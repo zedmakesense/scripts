@@ -7,8 +7,8 @@ ICON_ON="/usr/share/icons/Papirus/48x48/status/microphone-sensitivity-high.svg"
 
 if wpctl get-volume "$SOURCE" | grep -q '\[MUTED\]'; then
   wpctl set-mute "$SOURCE" 0
-  notify-send -i "$ICON_ON" "Microphone" "Unmuted"
+  notify-send -t 1000 -i "$ICON_ON" "Microphone" "Unmuted"
 else
   wpctl set-mute "$SOURCE" 1
-  notify-send -i "$ICON_MUTED" "Microphone" "Muted"
+  notify-send -t 1000 -i "$ICON_MUTED" "Microphone" "Muted"
 fi
