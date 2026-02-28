@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Detect whether to enable colours
+if [[ -t 1 && "${TERM:-}" != "dumb" ]]; then
+  BOLD="$(tput bold 2>/dev/null || printf '')"
+  CYAN="$(tput setaf 6 2>/dev/null || printf '')"
+  GREEN="$(tput setaf 2 2>/dev/null || printf '')"
+  MAGENTA="$(tput setaf 5 2>/dev/null || printf '')"
+  RESET="$(tput sgr0 2>/dev/null || printf '')"
+else
+  BOLD='' CYAN='' GREEN='' MAGENTA='' RESET=''
+fi
+
+# basic info
+HOST="$(hostname --short)"
+PRETTY="$(awk -F= '/^PRETTY_NAME=/{gsub(/"/,"",$2);print $2}' /etc/os-release 2>/dev/null || echo "Unknown")"
+KERNEL="$(uname -r 2>/dev/null || echo "Unknown")"
+
+# WM / session
+if pgrep -x sway >/dev/null 2>&1; then
+  WM="sway (Wayland)"
+elif [[ -n "${XDG_SESSION_DESKTOP-}" ]]; then
+  WM="$XDG_SESSION_DESKTOP"
+else
+  WM="unknown"
+fi
+
+# CPU
+CPU_MODEL="$(lscpu 2>/dev/null | awk -F: '/Model name:/ {gsub(/^[ \t]+/,"",$2); print $2; exit}' \
+            || awk -F: '/model name/ {gsub(/^[ \t]+/,"",$2); print $2; exit}' /proc/cpuinfo || echo "Unknown")"
+
+# GPU
+GPU_LINE="$(lspci 2>/dev/null | grep -Ei 'VGA|3D|Display' | head -n1 || true)"
+if [[ -n "$GPU_LINE" ]]; then
+  GPU="${GPU_LINE#*: }"
+  GPU="$(printf '%s' "$GPU" \
+        | sed -E 's/^(VGA compatible controller|3D controller|Display controller)[: ]*//I' \
+        | sed -E 's/\s*\(rev [^)]+\)//' \
+        | sed -E 's/^[[:space:]]+|[[:space:]]+$//')"
+else
+  GPU="Unknown"
+fi
+
+# RAM total and root disk total
+RAM_TOTAL="$(free -b 2>/dev/null | awk '/^Mem:/ {printf "%.1f GiB", $2/1024/1024/1024; found=1} END{if(!found) print "Unknown"}')"
+DISK_TOTAL="$(df -h / 2>/dev/null | awk 'NR==2 {print $2}' || echo "Unknown")"
+
+# header
+RAW_HEADER="${HOST}@${PRETTY}"
+COLOURED_HEADER="${BOLD}${CYAN}${HOST}${RESET}@${GREEN}${PRETTY}${RESET}"
+
+printf "\n%b\n" "$COLOURED_HEADER"
+
+COLUMNS=$(tput cols 2>/dev/null || echo 80)
+RAW_LEN=$(printf "%s" "$RAW_HEADER" | wc -m)
+PAD=4
+DESIRED=$(( RAW_LEN + PAD ))
+MAX_WIDTH=50
+if (( DESIRED > MAX_WIDTH )); then
+  LEN=$MAX_WIDTH
+else
+  LEN=$DESIRED
+fi
+if (( LEN > COLUMNS )); then
+  LEN=$COLUMNS
+fi
+if (( LEN < 20 )); then
+  LEN=20
+fi
+
+printf '%*s\n' "$LEN" '' | tr ' ' '-'
+
+printf "%-8s %b%s%b\n" "Kernel" "$MAGENTA" "$KERNEL" "$RESET"
+printf "%-8s %b%s%b\n" "WM"     "$MAGENTA" "$WM"     "$RESET"
+printf "%-8s %b%s%b\n" "CPU"    "$MAGENTA" "$CPU_MODEL" "$RESET"
+printf "%-8s %b%s%b\n" "GPU"    "$MAGENTA" "$GPU" "$RESET"
+printf "%-8s %b%s%b\n" "RAM"    "$MAGENTA" "$RAM_TOTAL" "$RESET"
+printf "%-8s %b%s%b\n" "Disk"   "$MAGENTA" "$DISK_TOTAL" "$RESET"
