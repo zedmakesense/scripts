@@ -1,79 +1,125 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
-# Detect whether to enable colours
-if [[ -t 1 && "${TERM:-}" != "dumb" ]]; then
-  BOLD="$(tput bold 2>/dev/null || printf '')"
-  CYAN="$(tput setaf 6 2>/dev/null || printf '')"
-  GREEN="$(tput setaf 2 2>/dev/null || printf '')"
-  MAGENTA="$(tput setaf 5 2>/dev/null || printf '')"
-  RESET="$(tput sgr0 2>/dev/null || printf '')"
-else
-  BOLD='' CYAN='' GREEN='' MAGENTA='' RESET=''
+reset=$(printf '\033[0m')
+
+# Gruvbox dark palette (truecolor)
+rgb() { printf '\033[38;2;%s;%s;%sm' "$1" "$2" "$3"; }
+
+fg0=$(rgb 235 219 178)   # #ebdbb2
+fg1=$(rgb 235 219 178)
+gray=$(rgb 146 131 116)  # #928374
+
+red=$(rgb 251 73 52)     # #fb4934
+green=$(rgb 184 187 38)  # #b8bb26
+yellow=$(rgb 250 189 47) # #fabd2f
+blue=$(rgb 131 165 152)  # #83a598
+purple=$(rgb 211 134 155)# #d3869b
+aqua=$(rgb 142 192 124)  # #8ec07c
+orange=$(rgb 254 128 25) # #fe8019
+
+os_icon="󰍹"
+ker_icon=""
+up_icon="󱎫"
+pkg_icon="󰏖"
+inst_icon="󰄾"
+gpu_icon=""
+cpu_icon=""
+ram_icon=""
+disk_icon="󰋊"
+
+user=$(id -un | tr '[:upper:]' '[:lower:]')
+host="$(hostname --short)"
+os="$(awk -F= '/^PRETTY_NAME=/{gsub(/"/,"",$2);print $2}' /etc/os-release 2>/dev/null || echo "Unknown")"
+kernel="$(uname -r 2>/dev/null || echo "Unknown")"
+uptime=$(uptime -p 2>/dev/null | sed 's/up //;s/ days\?/d/;s/ hours\?/h/;s/ minutes\?/m/' | tr -d ',')
+
+install_days="unknown"
+if [ -d /lost+found ]; then
+  install_date=$(stat -c %W /lost+found 2>/dev/null)
+  if [ "$install_date" -gt 0 ] 2>/dev/null; then
+    install_days=$((($(date +%s) - install_date) / 86400))
+  fi
 fi
 
-# basic info
-HOST="$(hostname --short)"
-PRETTY="$(awk -F= '/^PRETTY_NAME=/{gsub(/"/,"",$2);print $2}' /etc/os-release 2>/dev/null || echo "Unknown")"
-KERNEL="$(uname -r 2>/dev/null || echo "Unknown")"
+detect_pkgs() {
+  if command -v xbps-query >/dev/null; then
+    xbps-query -l | wc -l
+  elif command -v dpkg >/dev/null; then
+    dpkg -l | grep -c '^ii'
+  elif command -v pacman >/dev/null; then
+    pacman -Qq | wc -l
+  elif command -v rpm >/dev/null; then
+    rpm -qa | wc -l
+  elif command -v dnf >/dev/null; then
+    dnf list installed | wc -l
+  elif command -v zypper >/dev/null; then
+    zypper se -i | wc -l
+  elif command -v apk >/dev/null; then
+    apk info | wc -l
+  else
+    echo 0
+  fi
+}
 
-# WM / session
-if pgrep -x sway >/dev/null 2>&1; then
-  WM="sway (Wayland)"
-elif [[ -n "${XDG_SESSION_DESKTOP-}" ]]; then
-  WM="$XDG_SESSION_DESKTOP"
-else
-  WM="unknown"
-fi
+detect_pkg_manager() {
+  for cmd in xbps-query dpkg pacman rpm dnf zypper apk; do
+    if command -v "$cmd" >/dev/null; then
+      case "$cmd" in
+        xbps-query) echo "xbps" ;;
+        *) echo "$cmd" ;;
+      esac
+      return
+    fi
+  done
+  echo "unknown"
+}
 
-# CPU
-CPU_MODEL="$(lscpu 2>/dev/null | awk -F: '/Model name:/ {gsub(/^[ \t]+/,"",$2); print $2; exit}' \
-            || awk -F: '/model name/ {gsub(/^[ \t]+/,"",$2); print $2; exit}' /proc/cpuinfo || echo "Unknown")"
+pkg_count=$(detect_pkgs)
+pkg_manager=$(detect_pkg_manager)
 
-# GPU
+nix_pkgs=$(nix profile list 2>/dev/null | grep -c '^Name:' || echo 0)
+flat_pkgs=$(flatpak list --columns=app 2>/dev/null | tail -n +1 | wc -l)
+
+CPU_MODEL="$(lscpu 2>/dev/null | awk -F: '/Model name:/ {gsub(/^[ \t]+/,"",$2); print $2; exit}' ||
+  awk -F: '/model name/ {gsub(/^[ \t]+/,"",$2); print $2; exit}' /proc/cpuinfo || echo "Unknown")"
+
 GPU_LINE="$(lspci 2>/dev/null | grep -Ei 'VGA|3D|Display' | head -n1 || true)"
 if [[ -n "$GPU_LINE" ]]; then
   GPU="${GPU_LINE#*: }"
-  GPU="$(printf '%s' "$GPU" \
-        | sed -E 's/^(VGA compatible controller|3D controller|Display controller)[: ]*//I' \
-        | sed -E 's/\s*\(rev [^)]+\)//' \
-        | sed -E 's/^[[:space:]]+|[[:space:]]+$//')"
+  GPU="$(printf '%s' "$GPU" |
+    sed -E 's/^(VGA compatible controller|3D controller|Display controller)[: ]*//I' |
+    sed -E 's/\s*\(rev [^)]+\)//' |
+    sed -E 's/^[[:space:]]+|[[:space:]]+$//')"
 else
   GPU="Unknown"
 fi
 
-# RAM total and root disk total
 RAM_TOTAL="$(free -b 2>/dev/null | awk '/^Mem:/ {printf "%.1f GiB", $2/1024/1024/1024; found=1} END{if(!found) print "Unknown"}')"
 DISK_TOTAL="$(df -h / 2>/dev/null | awk 'NR==2 {print $2}' || echo "Unknown")"
 
-# header
-RAW_HEADER="${HOST}@${PRETTY}"
-COLOURED_HEADER="${BOLD}${CYAN}${HOST}${RESET}@${GREEN}${PRETTY}${RESET}"
+build_pkg_string() {
+  printf "%s  %s%s%s %s(%s)%s  %s%s%s %s(nix)%s  %s%s%s %s(flatpak)%s" \
+    "${yellow}${pkg_icon}" \
+    "${fg0}" "${pkg_count}" "${reset}" \
+    "${gray}" "${pkg_manager}" "${reset}" \
+    "${aqua}" "${nix_pkgs}" "${reset}" \
+    "${gray}" "${reset}" \
+    "${blue}" "${flat_pkgs}" "${reset}" \
+    "${gray}" "${reset}"
+}
 
-printf "\n%b\n" "$COLOURED_HEADER"
+row() {
+  printf '%b%-16s%b %s\n' "$gray" "$1" "$reset" "$2"
+}
 
-COLUMNS=$(tput cols 2>/dev/null || echo 80)
-RAW_LEN=$(printf "%s" "$RAW_HEADER" | wc -m)
-PAD=4
-DESIRED=$(( RAW_LEN + PAD ))
-MAX_WIDTH=50
-if (( DESIRED > MAX_WIDTH )); then
-  LEN=$MAX_WIDTH
-else
-  LEN=$DESIRED
-fi
-if (( LEN > COLUMNS )); then
-  LEN=$COLUMNS
-fi
-if (( LEN < 20 )); then
-  LEN=20
-fi
-
-printf '%*s\n' "$LEN" '' | tr ' ' '-'
-
-printf "%-8s %b%s%b\n" "Kernel" "$MAGENTA" "$KERNEL" "$RESET"
-printf "%-8s %b%s%b\n" "WM"     "$MAGENTA" "$WM"     "$RESET"
-printf "%-8s %b%s%b\n" "CPU"    "$MAGENTA" "$CPU_MODEL" "$RESET"
-printf "%-8s %b%s%b\n" "GPU"    "$MAGENTA" "$GPU" "$RESET"
-printf "%-8s %b%s%b\n" "RAM"    "$MAGENTA" "$RAM_TOTAL" "$RESET"
-printf "%-8s %b%s%b\n" "Disk"   "$MAGENTA" "$DISK_TOTAL" "$RESET"
+printf '\n'
+row "                "            "${green}${user}${gray}@${yellow}${host}"
+row "       .--."                "${red}${os_icon}  ${fg0}${os}"
+row "      |o_o |"                "${yellow}${ker_icon}  ${fg0}${kernel}"
+row "      |:_/ |"             "${green}${up_icon} ${fg0}${uptime}  ${purple}${inst_icon} ${fg0}${install_days}d"
+row "     //   \\ \\"              "$(build_pkg_string)"
+row "    (|     | )"             "${blue}${cpu_icon}  ${fg0}${CPU_MODEL}"
+row "   /'\\_   _/\`\\"             "${orange}${gpu_icon}  ${fg0}${GPU}"
+row "   \\___)=(___/"             "${red}${ram_icon}  ${fg0}${RAM_TOTAL}"
+row "                "             "${aqua}${disk_icon}  ${fg0}${DISK_TOTAL}"
+printf '%s\n' "$reset"
