@@ -42,7 +42,7 @@ if [ "$pstate_supported" = true ]; then
   fi
 fi
 
-extra_params="fsck.repair=yes zswap.enabled=0 apparmor=1 security=apparmor"
+extra_params="fsck.repair=yes zswap.enabled=0"
 [ -n "$pstate_param" ] && extra_params="$extra_params $pstate_param"
 
 for f in /boot/efi/loader/entries/*; do
