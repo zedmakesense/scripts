@@ -16,7 +16,7 @@ while true; do
   sleep "$interval"
 
   # ---- Time ----
-  timestamp=$(date +"%a %d/%m %H:%M")
+  timestamp=$(date '+%H:%M %a %d %b')
 
   # ---- CPU ----
   read total idle < <(read_cpu)
